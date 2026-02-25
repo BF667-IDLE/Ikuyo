@@ -1,7 +1,4 @@
 
-Diupdate untuk dokumentasi fitur Pairing Code.
-
-```markdown
 <h1 align="center">Ikuyo Bot - Base WhatsApp</h1>
 <p align="center">
     <img src="https://img.shields.io/badge/Nodejs-v18%2B-green?style=for-the-badge&logo=node.js" alt="NodeJS">
