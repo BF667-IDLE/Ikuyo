@@ -8,7 +8,12 @@ global.config = {
     owner: "628xxxxxxx", // Nomor Owner
     prefix: "/", // Prefix bot
     sessionName: "session",
-    repo: "https://github.com/BF667-IDLE/Ikuyo.git"
+    repo: "https://github.com/BF667-IDLE/Ikuyo.git",
+    // Pengaturan Pairing Code
+    pairing: {
+        is_pairing: true, // true = gunakan pairing code, false = gunakan QR Code
+        pairing_code: "12345678" // Kode pairing default (akan request ini jika state baru)
+    }
 };
 
 // Fitur Auto Reload untuk Config
