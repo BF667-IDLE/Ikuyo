@@ -5,14 +5,14 @@ const chalk = require('chalk');
 // Metadata Bot
 global.config = {
     name: "Ikuyo", // Nama Bot Default
-    owner: "628xxxxxxx", // Nomor Owner
+    owner: "6283150958207", // Nomor Owner
     prefix: "/", // Prefix bot
     sessionName: "session",
     repo: "https://github.com/BF667-IDLE/Ikuyo.git",
     // Pengaturan Pairing Code
     pairing: {
         is_pairing: true, // true = gunakan pairing code, false = gunakan QR Code
-        pairing_code: "12345678" // Kode pairing default (akan request ini jika state baru)
+        pairing_code: "6285124252139" // Kode pairing default (akan request ini jika state baru)
     }
 };
 
