@@ -1,4 +1,15 @@
 "use strict";
+
+// Core Modules
+const fs = require('fs');
+const path = require('path');
+
+// External Modules
+const pino = require('pino');
+const chalk = require('chalk');
+const qrcode = require('qrcode-terminal');
+
+// Baileys Modules
 const {
     makeWASocket,
     useMultiFileAuthState,
@@ -6,174 +17,206 @@ const {
     fetchLatestBaileysVersion,
     makeInMemoryStore
 } = require('wileys');
-const pino = require('pino');
-const fs = require('fs');
-const path = require('path');
-const chalk = require('chalk');
-const qrcode = require('qrcode-terminal');
 
-// Load Config Global
+// Local Modules
 require('./config.js');
-
-// Load Case Handler
 const caseHandler = require('./lib/case.js');
 
-// Auto Reload for Index
+// ===============================
+// Constants & Configuration
+// ===============================
 const currentFile = __filename;
-fs.watchFile(currentFile, () => {
-    fs.unwatchFile(currentFile);
-    console.log(chalk.green(`✓ ${path.basename(currentFile)} updated! Reloading...`));
-    delete require.cache[require.resolve(currentFile)];
-});
-
-// Plugin Loader untuk ESM
 const pluginFolder = path.join(__dirname, 'plugins');
 const pluginFilter = (filename) => path.extname(filename).toLowerCase() === '.mjs';
 
 global.plugins = {};
 
+// ===============================
+// Plugin Management
+// ===============================
+
+/**
+ * Load all plugins from plugins directory
+ */
 async function loadPlugins() {
-    if (!fs.existsSync(pluginFolder)) fs.mkdirSync(pluginFolder);
+    if (!fs.existsSync(pluginFolder)) {
+        fs.mkdirSync(pluginFolder);
+    }
+
     const files = fs.readdirSync(pluginFolder).filter(pluginFilter);
     
     for (const file of files) {
-        try {
-            const filePath = path.join(pluginFolder, file);
-            const module = await import(`file://${filePath}?update=${Date.now()}`);
-            global.plugins[file] = module.default || module;
-            console.log(chalk.cyan(`[ PLUGIN ] Loaded: ${file}`));
-        } catch (e) {
-            console.error(chalk.red(`[ ERROR ] Gagal load plugin ${file}:`), e);
-        }
+        await loadPluginFile(file);
     }
 }
 
-async function startIkuyo() {
-    await loadPlugins();
-    const { state, saveCreds } = await useMultiFileAuthState(global.config.sessionName);
-    
-    // Cek mode koneksi
-    const usePairing = global.config.pairing.is_pairing;
-    const pairCode = global.config.pairing.pairing_code;
+/**
+ * Load or reload a specific plugin file
+ */
+async function loadPluginFile(filename) {
+    try {
+        const filePath = path.join(pluginFolder, filename);
+        const module = await import(`file://${filePath}?update=${Date.now()}`);
+        global.plugins[filename] = module.default || module;
+        console.log(chalk.cyan(`[ PLUGIN ] Loaded: ${filename}`));
+    } catch (error) {
+        console.error(chalk.red(`[ ERROR ] Failed to load plugin ${filename}:`), error);
+    }
+}
 
-    const sock = makeWASocket({
-        version: (await fetchLatestBaileysVersion()).version,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: !usePairing, // Jika pairing true, QR mati. Jika false, QR nyala.
-        auth: state,
-        browser: ['Ikuyo (Mod)', 'Chrome', '1.0.0']
+/**
+ * Watch plugins directory for changes and auto-reload
+ */
+function watchPlugins() {
+    fs.watch(pluginFolder, async (event, filename) => {
+        if (filename && pluginFilter(filename)) {
+            console.log(chalk.magenta(`[ PLUGIN ] Changes detected: ${filename}`));
+            await loadPluginFile(filename);
+            console.log(chalk.green(`[ PLUGIN ] Reloaded: ${filename}`));
+        }
     });
+}
 
-    let pairingRequested = false; // Flag untuk mencegah multiple request
+// ===============================
+// Message Serialization
+// ===============================
 
+/**
+ * Serialize incoming message for easier handling
+ */
+function serializeMessage(message, sock) {
+    const types = Object.keys(message.message);
+    const type = types[0];
+    
+    const getText = () => {
+        if (type === 'conversation') return message.message.conversation;
+        if (type === 'extendedTextMessage') return message.message.extendedTextMessage.text;
+        if (type === 'imageMessage') return message.message.imageMessage.caption;
+        if (type === 'videoMessage') return message.message.videoMessage.caption;
+        if (type === 'documentMessage') return message.message.documentMessage.caption;
+        return '';
+    };
+    
+    const text = getText();
+    
+    return {
+        type,
+        text,
+        key: message.key,
+        pushName: message.pushName,
+        message: message.message,
+        from: message.key.remoteJid,
+        sender: message.key.participant || message.key.remoteJid,
+        isGroup: message.key.remoteJid.endsWith('@g.us'),
+        reply: async (teks, options = {}) => {
+            await sock.sendMessage(message.key.remoteJid, { text: teks }, { quoted: message, ...options });
+        }
+    };
+}
+
+// ===============================
+// Pairing Code Management
+// ===============================
+
+/**
+ * Request pairing code for device linking
+ */
+async function requestPairingCode(sock, phoneNumber) {
+    try {
+        const formattedCode = phoneNumber.replace(/[^0-9]/g, '');
+        const pairingCode = await sock.requestPairingCode(formattedCode);
+        
+        console.log(chalk.green(`[ PAIRING ] Your pairing code: ${pairingCode}`));
+        console.log(chalk.cyan('Enter this code in WhatsApp: Settings > Linked Devices > Link Device'));
+        
+        return pairingCode;
+    } catch (error) {
+        console.error(chalk.red('[ PAIRING ] Failed to request pairing code:'), error.message);
+        throw error;
+    }
+}
+
+// ===============================
+// Connection Handlers
+// ===============================
+
+/**
+ * Handle connection updates (QR, pairing, reconnect)
+ */
+function setupConnectionHandlers(sock, usePairing, pairCode) {
+    let pairingRequested = false;
+    
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        // QR Code Mode
+        // Handle QR Code display
         if (qr && !usePairing) {
-            console.log(chalk.yellow('[ QR MODE ] Scan QR Code di bawah ini:'));
+            console.log(chalk.yellow('[ QR MODE ] Scan the QR code below:'));
             qrcode.generate(qr, { small: true });
         }
         
+        // Handle connection close
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
-            console.log(chalk.red('Koneksi terputus, reason:', reason));
-            pairingRequested = false; // Reset flag untuk reconnect
+            console.log(chalk.red(`Connection closed, reason: ${reason}`));
+            pairingRequested = false;
             
             if (reason === DisconnectReason.loggedOut) {
-                console.log(chalk.red('Device Logged Out, hapus session dan scan ulang.'));
-                process.exit(1); // Keluar dari proses karena perlu login ulang
+                console.log(chalk.red('Device logged out. Please delete session and scan again.'));
+                process.exit(1);
             } else {
-                console.log(chalk.yellow('Mencoba reconnect dalam 5 detik...'));
-                setTimeout(() => {
-                    startIkuyo(); // Reconnect
-                }, 5000);
+                console.log(chalk.yellow('Attempting to reconnect in 5 seconds...'));
+                setTimeout(() => startIkuyo(), 5000);
             }
-        } else if (connection === 'open') {
-            console.log(chalk.green('✓ Bot Ikuyo berhasil terhubung!'));
+        } 
+        // Handle successful connection
+        else if (connection === 'open') {
+            console.log(chalk.green('✓ Bot Ikuyo successfully connected!'));
             
-            // Pairing Code Mode: hanya jika perangkat belum terdaftar dan belum diminta sebelumnya
+            // Request pairing code if enabled and not registered
             if (usePairing && !sock.authState.creds.registered && !pairingRequested) {
-                try {
-                    pairingRequested = true;
-                    console.log(chalk.yellow('[ PAIRING ] Meminta kode pairing...'));
-                    
-                    // Pastikan format nomor HP benar (kode negara tanpa + atau spasi)
-                    const formattedCode = pairCode.replace(/[^0-9]/g, ''); // Hanya angka
-                    const requestedCode = await sock.requestPairingCode(formattedCode);
-                    
-                    console.log(chalk.green(`[ PAIRING ] Kode Pairing Anda: ${requestedCode}`));
-                    console.log(chalk.cyan('Masukkan kode di atas di WhatsApp Anda: Settings > Linked Devices > Link Device'));
-                } catch (err) {
-                    console.error(chalk.red('[ PAIRING ] Gagal meminta kode pairing:'), err.message);
-                    pairingRequested = false; // Reset agar bisa coba lagi nanti
-                    
-                    // Jika gagal karena koneksi, coba lagi
-                    if (err.message.includes('Connection')) {
-                        console.log(chalk.yellow('Mencoba ulang permintaan pairing dalam 3 detik...'));
-                        setTimeout(() => {
-                            pairingRequested = false;
-                        }, 3000);
-                    }
-                }
+                pairingRequested = true;
+                await requestPairingCode(sock, pairCode).catch(() => {
+                    pairingRequested = false;
+                });
             }
         }
     });
+}
 
+/**
+ * Handle credential updates
+ */
+function setupCredentialHandlers(sock, saveCreds) {
     sock.ev.on('creds.update', saveCreds);
+}
 
+// ===============================
+// Message Handler
+// ===============================
+
+/**
+ * Handle incoming messages
+ */
+function setupMessageHandlers(sock) {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
-            const m = chatUpdate.messages[0];
-            if (!m.message) return;
+            const message = chatUpdate.messages[0];
+            if (!message.message || message.key.fromMe) return;
             
-            // Skip jika pesan dari sendiri
-            if (m.key.fromMe) return;
+            const msg = serializeMessage(message, sock);
+            const { text, from, isGroup, sender } = msg;
             
-            const serialize = (msg) => {
-                const types = Object.keys(msg.message);
-                const type = types[0];
-                
-                // Fungsi untuk mendapatkan teks dari berbagai tipe pesan
-                const getText = () => {
-                    if (type === 'conversation') return msg.message.conversation;
-                    if (type === 'extendedTextMessage') return msg.message.extendedTextMessage.text;
-                    if (type === 'imageMessage') return msg.message.imageMessage.caption;
-                    if (type === 'videoMessage') return msg.message.videoMessage.caption;
-                    if (type === 'documentMessage') return msg.message.documentMessage.caption;
-                    return '';
-                };
-                
-                const text = getText();
-                
-                return {
-                    type,
-                    text,
-                    key: msg.key,
-                    pushName: msg.pushName,
-                    message: msg.message,
-                    from: msg.key.remoteJid,
-                    sender: msg.key.participant || msg.key.remoteJid,
-                    isGroup: msg.key.remoteJid.endsWith('@g.us'),
-                    reply: async (teks, options = {}) => {
-                        await sock.sendMessage(msg.key.remoteJid, { text: teks }, { quoted: msg, ...options });
-                    }
-                };
-            };
-            
-            const msg = serialize(m);
-            const { text, type, from, isGroup, sender } = msg;
-            
-            // Hanya proses jika ada teks
+            // Only process messages with text
             if (!text) return;
             
             const prefix = global.config.prefix || '.';
-            const isCmd = text.startsWith(prefix);
-            const command = isCmd ? text.slice(1).trim().split(/ +/).shift().toLowerCase() : null;
+            const isCommand = text.startsWith(prefix);
+            const command = isCommand ? text.slice(1).trim().split(/ +/).shift().toLowerCase() : null;
             const args = text.trim().split(/ +/).slice(1);
-            const fullArgs = text.trim().slice(command.length + 1).trim();
+            const fullArgs = text.trim().slice(command?.length + 1).trim();
             
-            const ctx = { 
+            const context = { 
                 text, 
                 prefix, 
                 command, 
@@ -185,64 +228,114 @@ async function startIkuyo() {
                 isGroup,
                 sender
             };
-
-            // Case Handler (jika ada)
+            
+            // Execute case handler if available
             if (typeof caseHandler === 'function') {
-                await caseHandler(msg, sock, ctx);
+                await caseHandler(msg, sock, context);
             }
-
-            // Plugin Handler
-            if (isCmd && global.plugins) {
-                for (const name in global.plugins) {
-                    const plugin = global.plugins[name];
-                    
-                    // Cek command
-                    if (plugin.command && Array.isArray(plugin.command) && plugin.command.includes(command)) {
-                        try {
-                            console.log(chalk.blue(`[ EXEC ] Plugin: ${name} | Command: ${command}`));
-                            await plugin.run(msg, sock, ctx);
-                        } catch (e) {
-                            console.error(chalk.red(`Error plugin ${name}:`), e);
-                            await msg.reply(`❌ Terjadi error di plugin *${name}*\n\`\`\`${e.message}\`\`\``);
-                        }
-                    }
-                }
+            
+            // Execute plugin handlers
+            if (isCommand && global.plugins) {
+                await executePlugins(command, msg, sock, context);
             }
-
-        } catch (err) {
-            console.error(chalk.red('Error di messages.upsert:'), err);
+            
+        } catch (error) {
+            console.error(chalk.red('Error in messages.upsert:'), error);
         }
-    });
-    
-    // Watcher untuk Plugins
-    fs.watch(pluginFolder, async (event, filename) => {
-        if (filename && pluginFilter(filename)) {
-            console.log(chalk.magenta(`[ PLUGIN ] Perubahan terdeteksi: ${filename}`));
-            const filePath = path.join(pluginFolder, filename);
-            try {
-                // Hapus dari cache
-                const moduleUrl = `file://${filePath}?update=${Date.now()}`;
-                const module = await import(moduleUrl);
-                global.plugins[filename] = module.default || module;
-                console.log(chalk.green(`[ PLUGIN ] Reloaded: ${filename}`));
-            } catch (e) {
-                console.error(chalk.red(`[ ERROR ] Gagal reload ${filename}`), e);
-            }
-        }
-    });
-
-    // Handle uncaught exceptions
-    process.on('uncaughtException', (err) => {
-        console.error(chalk.red('[ FATAL ] Uncaught Exception:'), err);
-    });
-
-    process.on('unhandledRejection', (err) => {
-        console.error(chalk.red('[ FATAL ] Unhandled Rejection:'), err);
     });
 }
 
-// Start bot
-startIkuyo().catch(err => {
-    console.error(chalk.red('[ FATAL ] Gagal start bot:'), err);
+/**
+ * Execute matching plugins for a command
+ */
+async function executePlugins(command, msg, sock, context) {
+    for (const [name, plugin] of Object.entries(global.plugins)) {
+        if (plugin.command && Array.isArray(plugin.command) && plugin.command.includes(command)) {
+            try {
+                console.log(chalk.blue(`[ EXEC ] Plugin: ${name} | Command: ${command}`));
+                await plugin.run(msg, sock, context);
+            } catch (error) {
+                console.error(chalk.red(`Error in plugin ${name}:`), error);
+                await msg.reply(`❌ Error in plugin *${name}*\n\`\`\`${error.message}\`\`\``);
+            }
+        }
+    }
+}
+
+// ===============================
+// Process Error Handlers
+// ===============================
+
+/**
+ * Setup global error handlers
+ */
+function setupErrorHandlers() {
+    process.on('uncaughtException', (error) => {
+        console.error(chalk.red('[ FATAL ] Uncaught Exception:'), error);
+    });
+    
+    process.on('unhandledRejection', (error) => {
+        console.error(chalk.red('[ FATAL ] Unhandled Rejection:'), error);
+    });
+}
+
+// ===============================
+// Auto Reload
+// ===============================
+
+/**
+ * Setup auto-reload for main file
+ */
+function setupAutoReload() {
+    fs.watchFile(currentFile, () => {
+        fs.unwatchFile(currentFile);
+        console.log(chalk.green(`✓ ${path.basename(currentFile)} updated! Reloading...`));
+        delete require.cache[require.resolve(currentFile)];
+    });
+}
+
+// ===============================
+// Bot Initialization
+// ===============================
+
+/**
+ * Initialize and start the bot
+ */
+async function startIkuyo() {
+    await loadPlugins();
+    
+    const { state, saveCreds } = await useMultiFileAuthState(global.config.sessionName);
+    
+    const usePairing = global.config.pairing.is_pairing;
+    const pairCode = global.config.pairing.pairing_code;
+    
+    const sock = makeWASocket({
+        version: (await fetchLatestBaileysVersion()).version,
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: !usePairing,
+        auth: state,
+        browser: ['Ikuyo (Mod)', 'Chrome', '1.0.0']
+    });
+    
+    // Setup all handlers
+    setupConnectionHandlers(sock, usePairing, pairCode);
+    setupCredentialHandlers(sock, saveCreds);
+    setupMessageHandlers(sock);
+    watchPlugins();
+}
+
+// ===============================
+// Application Entry Point
+// ===============================
+
+// Setup error handlers
+setupErrorHandlers();
+
+// Setup auto-reload
+setupAutoReload();
+
+// Start the bot
+startIkuyo().catch(error => {
+    console.error(chalk.red('[ FATAL ] Failed to start bot:'), error);
     process.exit(1);
 });
