@@ -5,14 +5,46 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "author": "BF667-IDLE",
   "license": "MIT",
   "dependencies": {
     "wileys": "latest",
+    "@whiskeysockets/baileys": "latest",
     "pino": "latest",
     "chalk": "4.1.2",
-    "qrcode-terminal": "latest"
+    "qrcode-terminal": "latest",
+    "mongoose": "latest",
+    "fs-extra": "latest",
+    "moment-timezone": "latest",
+    "node-cron": "latest",
+    "axios": "latest",
+    "node-fetch": "2.7.0",
+    "file-type": "16.5.4",
+    "form-data": "latest",
+    "sharp": "latest",
+    "fluent-ffmpeg": "latest",
+    "ytdl-core": "latest",
+    "yt-search": "latest",
+    "google-it": "latest",
+    "moment": "latest",
+    "colors": "latest",
+    "readline": "latest",
+    "figlet": "latest",
+    "gradient-string": "latest",
+    "cfonts": "latest",
+    "node-cache": "latest",
+    "socket.io-client": "latest",
+    "express": "latest",
+    "body-parser": "latest",
+    "cors": "latest"
+  },
+  "devDependencies": {
+    "nodemon": "latest"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
