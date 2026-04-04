@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import sharp from 'sharp';
 import ffmpeg from 'fluent-ffmpeg';
 import { fileTypeFromBuffer } from 'file-type';
 
@@ -96,23 +95,50 @@ async function downloadMedia(sock, m, quotedMsg, quotedCtx) {
 }
 
 // ===============================
-// Sticker Helper Functions
+// Sticker Helper Functions (ffmpeg-based, no native deps)
 // ===============================
 
 /**
  * Create a static WebP sticker (512x512) with transparent padding.
- * Works with PNG, JPEG, WebP, and other image formats.
+ * Uses ffmpeg for resize + webp conversion (works on Android).
+ *
+ * @param {Buffer} imageBuffer - Input image buffer (JPEG, PNG, WebP, etc.)
+ * @returns {Promise<Buffer>} WebP sticker buffer
  */
 async function createSticker(imageBuffer) {
-    return await sharp(imageBuffer, { animated: false })
-        .resize({
-            width: 512,
-            height: 512,
-            fit: 'contain',
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-        })
-        .webp({ quality: 80 })
-        .toBuffer();
+    const imgPath = tempFile('png');
+    const outPath = tempFile('webp');
+
+    try {
+        fs.writeFileSync(imgPath, imageBuffer);
+
+        await new Promise((resolve, reject) => {
+            ffmpeg(imgPath)
+                .complexFilter([
+                    'scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease',
+                    'pad=512:512:(ow-iw)/2:(oh-ih)/2:color=transparent',
+                ])
+                .outputOptions([
+                    '-y',
+                    '-vcodec', 'libwebp',
+                    '-lossless', '0',
+                    '-compression_level', '6',
+                    '-q:v', '80',
+                    '-loop', '0',
+                    '-preset', 'default',
+                    '-an',
+                    '-vsync', '0',
+                ])
+                .output(outPath)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+        });
+
+        return fs.readFileSync(outPath);
+    } finally {
+        cleanup(imgPath, outPath);
+    }
 }
 
 /**
@@ -239,6 +265,7 @@ async function handleSticker(m, sock, prefix) {
 
 /**
  * /take or /toimg — Convert a sticker back to an image (exif-free).
+ * Uses ffmpeg to convert WebP → PNG (strips all metadata).
  */
 async function handleToImage(m, sock, prefix) {
     const media = detectMedia(m);
@@ -260,16 +287,32 @@ async function handleToImage(m, sock, prefix) {
         const buffer = await downloadMedia(sock, m, media.quotedMsg, media.quotedCtx);
         if (!buffer) throw new Error('Gagal mengunduh sticker.');
 
-        // Convert to PNG (strips all EXIF metadata)
-        const imageBuffer = await sharp(buffer)
-            .png({ quality: 100 })
-            .toBuffer();
+        // Convert WebP to PNG via ffmpeg (strips all EXIF metadata)
+        const imgPath = tempFile('webp');
+        const outPath = tempFile('png');
 
-        await sock.sendMessage(
-            m.from,
-            { image: imageBuffer, mimetype: 'image/png' },
-            { quoted: m.key }
-        );
+        try {
+            fs.writeFileSync(imgPath, buffer);
+
+            await new Promise((resolve, reject) => {
+                ffmpeg(imgPath)
+                    .outputOptions(['-y'])
+                    .output(outPath)
+                    .on('end', resolve)
+                    .on('error', reject)
+                    .run();
+            });
+
+            const imageBuffer = fs.readFileSync(outPath);
+
+            await sock.sendMessage(
+                m.from,
+                { image: imageBuffer, mimetype: 'image/png' },
+                { quoted: m.key }
+            );
+        } finally {
+            cleanup(imgPath, outPath);
+        }
     } catch (err) {
         console.error('[ take ] Error:', err);
         await m.reply(`❌ Gagal mengkonversi sticker: *${err.message}*`);

@@ -38,7 +38,7 @@
     "express": "latest",
     "body-parser": "latest",
     "cors": "latest",
-    "jimp": "latest"
+    "jimp": "0.16.13"
   },
   "devDependencies": {
     "nodemon": "latest"
