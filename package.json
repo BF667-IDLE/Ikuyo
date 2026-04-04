@@ -39,7 +39,8 @@
     "socket.io-client": "latest",
     "express": "latest",
     "body-parser": "latest",
-    "cors": "latest"
+    "cors": "latest",
+    "jimp": "latest"
   },
   "devDependencies": {
     "nodemon": "latest"
