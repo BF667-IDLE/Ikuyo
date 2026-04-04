@@ -23,7 +23,6 @@
     "node-fetch": "2.7.0",
     "file-type": "16.5.4",
     "form-data": "latest",
-    "sharp": "latest",
     "fluent-ffmpeg": "latest",
     "ytdl-core": "latest",
     "yt-search": "latest",
