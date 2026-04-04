@@ -30,6 +30,7 @@ const {
 require('./config.js');
 const caseHandler = require('./lib/case.js');
 const btnHelper = require('./lib/button.js');
+const thumbnail = require('./lib/thumbnail');
 
 // ─── Inisialisasi Global Button Handlers ───
 global._buttonHandlers = {};
@@ -351,12 +352,22 @@ function serializeMessage(message, sock) {
 
             switch (msgType) {
                 case 'image':
-                    await sock.sendMessage(from, {
-                        image: { url: content },
-                        caption: options.caption || '',
-                        mimetype: options.mimetype || 'image/jpeg',
-                        ...sendOpts
-                    });
+                    // Support Buffer (fix Wileys image bug) dan URL
+                    if (Buffer.isBuffer(content)) {
+                        await sock.sendMessage(from, {
+                            image: content,
+                            caption: options.caption || '',
+                            mimetype: options.mimetype || 'image/jpeg',
+                            ...sendOpts
+                        });
+                    } else {
+                        await sock.sendMessage(from, {
+                            image: { url: content },
+                            caption: options.caption || '',
+                            mimetype: options.mimetype || 'image/jpeg',
+                            ...sendOpts
+                        });
+                    }
                     break;
                 case 'video':
                     await sock.sendMessage(from, {
@@ -1064,7 +1075,14 @@ setupErrorHandlers();
 setupAutoReload();
 
 // ── Cek update ──
-checkForUpdates().then(() => {
+checkForUpdates().then(async () => {
+    // ── Preload default thumbnail ──
+    try {
+        await thumbnail.preloadDefaultThumbnail();
+    } catch (err) {
+        logWarn('[ STARTUP ]', 'Gagal preload thumbnail: ' + err.message);
+    }
+
     // ── Start bot ──
     return startIkuyo();
 }).catch(error => {
