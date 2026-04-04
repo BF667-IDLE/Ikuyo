@@ -32,6 +32,7 @@ const caseHandler = require('./lib/case.js');
 const btnHelper = require('./lib/button.js');
 const thumbnail = require('./lib/thumbnail');
 const jadibot = require('./lib/jadibot');
+const hfdb = require('./lib/hfdb');
 
 // ─── Inisialisasi Global Button Handlers ───
 global._buttonHandlers = {};
@@ -537,6 +538,15 @@ function setupConnectionHandlers(sock, usePairing, pairCode) {
                     const stopped = jadibot.stopAll();
                     if (stopped > 0) logInfo('[ CONN ]', `Stopped ${stopped} jadibot(s) on main bot logout`);
                 } catch {}
+
+                // Save data to HF before exit
+                if (hfdb.enabled) {
+                    try {
+                        logInfo('[ CONN ]', 'Saving data to HuggingFace...');
+                        await hfdb.syncJadibot('push');
+                    } catch {}
+                }
+
                 process.exit(1);
             } else {
                 const delay = getReconnectDelay();
@@ -1069,6 +1079,19 @@ async function startIkuyo() {
     // ── Initialize JadiBot Manager ──
     jadibot.init(sock);
     logInfo('[ JADIBOT ]', `JadiBot manager initialized (owner: ${global.config.jadibot?.owner || global.config.owner})`);
+
+    // ── Initialize HuggingFace Database ──
+    hfdb.init();
+    if (hfdb.enabled) {
+        try {
+            const pullResult = await hfdb.syncJadibot('pull');
+            if (pullResult.success > 0) {
+                logSuccess('[ HFDB ]', `Loaded ${pullResult.success} file(s) from HuggingFace`);
+            }
+        } catch (err) {
+            logWarn('[ HFDB ]', `Gagal pull data dari HF: ${err.message}`);
+        }
+    }
 }
 
 // ============================================================

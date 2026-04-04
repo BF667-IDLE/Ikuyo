@@ -77,6 +77,16 @@ global.config = {
         max_reconnect: 5,            // Maksimal percobaan reconnect
     },
 
+    // Pengaturan HuggingFace Database (HFDB)
+    // Semua data bot (banlist, TOS, session, config) disimpan & sync ke HF Dataset
+    // Buat dataset kosong di https://huggingface.co/new-dataset
+    hfdb: {
+        enabled: false,              // Aktifkan HF database sync
+        repo_id: "",                 // ID dataset repo (contoh: "BF667-IDLE/ikuyo-bot-db")
+        api_key: "",                 // HF API token (dari https://huggingface.co/settings/tokens)
+        auto_save_interval: 30,      // Auto-save ke HF setiap X menit (0 = disabled)
+    },
+
     // Auto-Update Check
     auto_update_check: true,      // Cek update git saat startup
 
