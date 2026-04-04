@@ -3,8 +3,8 @@
 <p align="center">
     <img src="https://img.shields.io/badge/Nodejs-v18%2B-green?style=for-the-badge&logo=node.js" alt="NodeJS">
     <img src="https://img.shields.io/badge/Library-Wileys-blue?style=for-the-badge" alt="Wileys">
-    <img src="https://img.shields.io/badge/Commands-76%2B-orange?style=for-the-badge" alt="Commands">
-    <img src="https://img.shields.io/badge/Plugins-7-purple?style=for-the-badge" alt="Plugins">
+    <img src="https://img.shields.io/badge/Commands-83%2B-orange?style=for-the-badge" alt="Commands">
+    <img src="https://img.shields.io/badge/Plugins-8-purple?style=for-the-badge" alt="Plugins">
     <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License">
 </p>
 
@@ -144,6 +144,20 @@ Bot mendukung **Pairing Code** maupun **QR Code** untuk koneksi, dilengkapi **Au
 | `/math <ekspresi>` | Hitung ekspresi matematika |
 | `/timer <detik>` | Timer countdown (1-3600 detik) |
 
+### 🤖 JadiBot (Multi-Connection)
+
+| Command | Deskripsi |
+|---------|-----------|
+| `/jadibot` | Buat jadibot baru (auto pairing code) |
+| `/jadibot stop` | Stop jadibot yang sedang berjalan |
+| `/jadibot private` | Set mode private (hanya owner) |
+| `/jadibot public` | Set mode public (semua orang) |
+| `/listjadi` | Lihat daftar jadibot aktif |
+| `/banjadi <nomor>` | Ban jadibot yang melanggar TOS (owner) |
+| `/unban <nomor>` | Unban jadibot (owner) |
+
+> ⚠️ Fitur JadiBot hanya untuk owner bot (`6283150958207`). Baca [TOS JadiBot](TOS_jadibot.md) sebelum menggunakan.
+
 ### ✏️ Text Utilities
 
 | Command | Deskripsi |
@@ -167,7 +181,9 @@ Bot mendukung **Pairing Code** maupun **QR Code** untuk koneksi, dilengkapi **Au
 Ikuyo/
 ├── lib/
 │   ├── button.js           # Button & interactive message helper
-│   └── case.js             # Logic command switch case + menu handler
+│   ├── case.js             # Logic command switch case + menu handler
+│   ├── jadibot.js          # JadiBot engine (multi-connection Baileys)
+│   └── thumbnail.js        # Image/thumbnail helper (fix Wileys bug)
 ├── plugins/                # Folder plugin ESM (.mjs)
 │   ├── ai.mjs              # AI chat, image gen, translate, define
 │   ├── downloader.mjs      # YouTube play/download, TikTok
@@ -175,14 +191,17 @@ Ikuyo/
 │   ├── group.mjs           # Group management & moderation
 │   ├── owner.mjs           # Owner-only commands
 │   ├── sticker.mjs         # Sticker maker & converter
-│   └── text.mjs            # Text utilities & font style
+│   ├── text.mjs            # Text utilities & font style
+│   └── jadibot.mjs         # JadiBot commands (create, stop, list, ban)
 ├── session/                # Folder session (auto-generate, di-gitignore)
+├── jadibot_sessions/       # Folder session jadibot (di-gitignore)
 ├── temp/                   # File sementara (di-gitignore)
 ├── config.js               # Konfigurasi global bot
 ├── index.js                # File utama / entry point
 ├── package.json
 ├── .gitignore
-└── README.md
+├── README.md
+└── TOS_jadibot.md          # Syarat & ketentuan JadiBot
 ```
 
 ## ⚙️ Instalasi
@@ -355,6 +374,20 @@ const sections = btn.paginateList(items, 5, 'Hasil {start}-{end}');
 | node-cache | In-memory caching |
 | moment-timezone | Date/time formatting |
 | chalk | Console coloring |
+
+## 📜 TOS JadiBot
+
+Fitur JadiBot memiliki **Syarat & Ketentuan (TOS)** tersendiri yang wajib disetujui sebelum menggunakan fitur tersebut.
+
+📄 **Baca selengkapnya:** [TOS_jadibot.md](TOS_jadibot.md)
+
+**Ringkasan TOS JadiBot:**
+- Dilarang keras: spam, ilegal, konten berbahaya, jual beli akses, eksploitasi sistem
+- Owner berhak mematikan/banned jadibot kapan saja
+- Nomor WhatsApp berisiko di-banned oleh WhatsApp
+- Gunakan nomor sekunder, bukan nomor utama
+- Maksimal 1 jadibot per nomor, 10 jadibot bersamaan
+- Owner JadiBot bertanggung jawab atas aktivitas botnya
 
 ## 📌 Lisensi
 
