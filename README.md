@@ -2,14 +2,14 @@
 <h1 align="center">Ikuyo Bot - WhatsApp Multi-Device</h1>
 <p align="center">
     <img src="https://img.shields.io/badge/Nodejs-v18%2B-green?style=for-the-badge&logo=node.js" alt="NodeJS">
-    <img src="https://img.shields.io/badge/Library-Wileys-blue?style=for-the-badge" alt="Wileys">
+    <img src="https://img.shields.io/badge/Library-Baileys-blue?style=for-the-badge" alt="Baileys">
     <img src="https://img.shields.io/badge/Commands-83%2B-orange?style=for-the-badge" alt="Commands">
     <img src="https://img.shields.io/badge/Plugins-8-purple?style=for-the-badge" alt="Plugins">
     <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License">
 </p>
 
 <p align="center">
-    Bot WhatsApp canggih berbasis NodeJS dengan library <b>Wileys (Baileys Mod)</b>.
+    Bot WhatsApp canggih berbasis NodeJS dengan library <b>@whiskeysockets/baileys</b>.
     Dilengkapi 76+ command, 7 plugin, interactive button menu, downloader, AI chat, group management, dan banyak lagi.
 </p>
 
@@ -17,7 +17,7 @@
 
 ## 📝 Deskripsi
 
-**Ikuyo** adalah bot WhatsApp yang dibangun menggunakan NodeJS dengan library [Wileys](https://www.npmjs.com/package/wileys) (modifikasi dari Baileys). Bot ini dirancang dengan arsitektur yang rapi menggunakan sistem **dual-layer** (case handler + plugin ESM) yang memudahkan pengembangan fitur baru.
+**Ikuyo** adalah bot WhatsApp yang dibangun menggunakan NodeJS dengan library [@whiskeysockets/baileys](https://github.com/WhiskeySockets/Baileys). Bot ini dirancang dengan arsitektur yang rapi menggunakan sistem **dual-layer** (case handler + plugin ESM) yang memudahkan pengembangan fitur baru.
 
 Bot mendukung **Pairing Code** maupun **QR Code** untuk koneksi, dilengkapi **Auto Reload** (hot reload) agar perubahan kode langsung aktif tanpa restart, serta memiliki sistem **Interactive Button** untuk pengalaman pengguna yang modern.
 
@@ -183,7 +183,7 @@ Ikuyo/
 │   ├── button.js           # Button & interactive message helper
 │   ├── case.js             # Logic command switch case + menu handler
 │   ├── jadibot.js          # JadiBot engine (multi-connection Baileys)
-│   └── thumbnail.js        # Image/thumbnail helper (fix Wileys bug)
+│   └── thumbnail.js        # Image/thumbnail helper (fix Baileys bug)
 ├── plugins/                # Folder plugin ESM (.mjs)
 │   ├── ai.mjs              # AI chat, image gen, translate, define
 │   ├── downloader.mjs      # YouTube play/download, TikTok
@@ -366,7 +366,7 @@ const sections = btn.paginateList(items, 5, 'Hasil {start}-{end}');
 | Teknologi | Kegunaan |
 |-----------|----------|
 | Node.js | Runtime environment |
-| Wileys (Baileys Mod) | WhatsApp Web API library |
+| @whiskeysockets/baileys | WhatsApp Web API library |
 | sharp | Image processing (sticker) |
 | fluent-ffmpeg | Audio/video processing |
 | ytdl-core + yt-search | YouTube downloader |

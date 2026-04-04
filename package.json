@@ -1,7 +1,7 @@
 {
   "name": "ikuyo-bot",
   "version": "1.0.0",
-  "description": "Base Bot Ikuyo menggunakan Wileys",
+  "description": "Base Bot Ikuyo menggunakan Baileys (@whiskeysockets/baileys)",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -11,7 +11,6 @@
   "author": "BF667-IDLE",
   "license": "MIT",
   "dependencies": {
-    "wileys": "latest",
     "@whiskeysockets/baileys": "latest",
     "pino": "latest",
     "chalk": "4.1.2",

@@ -24,7 +24,7 @@ const {
     fetchLatestBaileysVersion,
     makeInMemoryStore,
     downloadMediaMessage
-} = require('wileys');
+} = require('@whiskeysockets/baileys');
 
 // ─── Local Modules ───
 require('./config.js');
@@ -354,7 +354,7 @@ function serializeMessage(message, sock) {
 
             switch (msgType) {
                 case 'image':
-                    // Support Buffer (fix Wileys image bug) dan URL
+                    // Support Buffer dan URL
                     if (Buffer.isBuffer(content)) {
                         await sock.sendMessage(from, {
                             image: content,
