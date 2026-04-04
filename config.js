@@ -7,7 +7,7 @@ global.config = {
     name: "Ikuyo", // Nama Bot Default
     owner: "6283150958207", // Nomor Owner
     ownerNumber: ["6283150958207"], // Array nomor owner (bisa lebih dari 1)
-    prefix: "/", // Prefix bot
+    prefix: ".", // Prefix bot
     sessionName: "session",
     repo: "https://github.com/BF667-IDLE/Ikuyo.git",
 
