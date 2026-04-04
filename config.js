@@ -66,6 +66,17 @@ global.config = {
         yt_max_quality: "720p",   // Kualitas maksimum YouTube download
     },
 
+    // Pengaturan JadiBot
+    jadibot: {
+        enabled: true,               // Aktifkan fitur jadibot
+        owner: "6283150958207",      // Nomor yang diizinkan membuat jadibot
+        max_concurrent: 10,          // Maksimal jadibot bersamaan
+        default_mode: "private",     // Mode default: private atau public
+        require_tos: true,           // Wajib setujui TOS sebelum jadibot
+        auto_reconnect: true,        // Otomatis reconnect jika terputus
+        max_reconnect: 5,            // Maksimal percobaan reconnect
+    },
+
     // Auto-Update Check
     auto_update_check: true,      // Cek update git saat startup
 

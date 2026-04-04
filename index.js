@@ -31,6 +31,7 @@ require('./config.js');
 const caseHandler = require('./lib/case.js');
 const btnHelper = require('./lib/button.js');
 const thumbnail = require('./lib/thumbnail');
+const jadibot = require('./lib/jadibot');
 
 // ─── Inisialisasi Global Button Handlers ───
 global._buttonHandlers = {};
@@ -531,6 +532,11 @@ function setupConnectionHandlers(sock, usePairing, pairCode) {
 
             if (reason === DisconnectReason.loggedOut) {
                 logError('[ CONN ]', new Error('Device logged out. Hapus session dan scan ulang.'));
+                // Stop all jadibots on main bot logout
+                try {
+                    const stopped = jadibot.stopAll();
+                    if (stopped > 0) logInfo('[ CONN ]', `Stopped ${stopped} jadibot(s) on main bot logout`);
+                } catch {}
                 process.exit(1);
             } else {
                 const delay = getReconnectDelay();
@@ -1059,6 +1065,10 @@ async function startIkuyo() {
 
     // ── Simpan sock ke global untuk akses dari plugin/case ──
     global.sock = sock;
+
+    // ── Initialize JadiBot Manager ──
+    jadibot.init(sock);
+    logInfo('[ JADIBOT ]', `JadiBot manager initialized (owner: ${global.config.jadibot?.owner || global.config.owner})`);
 }
 
 // ============================================================
