@@ -21,7 +21,6 @@
     "node-cron": "latest",
     "axios": "latest",
     "node-fetch": "2.7.0",
-    "file-type": "16.5.4",
     "form-data": "latest",
     "fluent-ffmpeg": "latest",
     "ytdl-core": "latest",
@@ -37,8 +36,7 @@
     "socket.io-client": "latest",
     "express": "latest",
     "body-parser": "latest",
-    "cors": "latest",
-    "jimp": "0.16.13"
+    "cors": "latest"
   },
   "devDependencies": {
     "nodemon": "latest"

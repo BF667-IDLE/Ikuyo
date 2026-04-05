@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
-import { fileTypeFromBuffer } from 'file-type';
 
 // ===============================
 // Constants & Configuration
@@ -97,6 +96,43 @@ async function downloadMedia(sock, m, quotedMsg, quotedCtx) {
 // ===============================
 // Sticker Helper Functions (ffmpeg-based, no native deps)
 // ===============================
+
+/**
+ * Detect video file extension from buffer magic bytes.
+ * No external dependencies needed.
+ * @param {Buffer} buffer
+ * @returns {string} File extension (mp4, webm, 3gp, mkv, avi, etc.)
+ */
+function detectVideoExt(buffer) {
+    if (!buffer || buffer.length < 12) return 'mp4';
+
+    const hex = buffer.slice(0, 12).toString('hex');
+
+    // MP4 / M4V / MOV
+    if (hex.includes('66747970') || hex.includes('66747970')) return 'mp4';
+    if (hex.startsWith('0000001c66747970') || hex.startsWith('0000001866747970') || hex.startsWith('0000002066747970')) return 'mp4';
+    if (buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) return 'mp4';
+
+    // WebM (starts with 1A 45 DF A3)
+    if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) return 'webm';
+
+    // 3GP (starts with 00 00 00 ftyp3gp)
+    if (buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70 &&
+        buffer[8] === 0x33 && buffer[9] === 0x67) return '3gp';
+
+    // AVI (starts with RIFF....AVI)
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+        buffer[8] === 0x41 && buffer[9] === 0x56 && buffer[10] === 0x49) return 'avi';
+
+    // MKV (same as WebM EBML header)
+    if (buffer[0] === 0x1a && buffer[1] === 0x45) return 'mkv';
+
+    // FLV (starts with FLV)
+    if (buffer[0] === 0x46 && buffer[1] === 0x4c && buffer[2] === 0x56) return 'flv';
+
+    // Default fallback to mp4 (ffmpeg can handle it)
+    return 'mp4';
+}
 
 /**
  * Create a static WebP sticker (512x512) with transparent padding.
@@ -344,9 +380,8 @@ async function handleStickerGif(m, sock, prefix) {
         const buffer = await downloadMedia(sock, m, media.quotedMsg, media.quotedCtx);
         if (!buffer) throw new Error('Gagal mengunduh video.');
 
-        // Detect actual mime to choose correct file extension
-        const ft = await fileTypeFromBuffer(buffer);
-        const ext = ft?.ext || 'mp4';
+        // Detect video format from buffer header magic bytes
+        const ext = detectVideoExt(buffer);
 
         const videoPath = tempFile(ext);
         fs.writeFileSync(videoPath, buffer);
