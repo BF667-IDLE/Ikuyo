@@ -502,6 +502,7 @@ async function requestPairingCode(sock, phoneNumber) {
 
 let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 30000; // 30 detik maksimal
+let isStarting = false; // Guard mencegah multiple startIkuyo() concurrent
 
 /**
  * Hitung delay reconnection dengan exponential backoff
@@ -561,6 +562,7 @@ function setupConnectionHandlers(sock, usePairing) {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const reasonMsg = lastDisconnect?.error?.message || 'Unknown';
             logError('[ CONN ]', new Error(`Koneksi ditutup. Code: ${statusCode} | ${reasonMsg}`));
+            isStarting = false; // Release guard supaya reconnect bisa startIkuyo()
 
             // ── 515 = Stream Errored (restart required) ──
             //    NORMAL setelah QR scan / pairing code — WA server restart stream.
@@ -660,6 +662,7 @@ function setupConnectionHandlers(sock, usePairing) {
         // ── Koneksi terbuka ──
         else if (connection === 'open') {
             resetReconnectCounter();
+            isStarting = false; // Release guard — bot sudah siap
             pairingRequested = true;
             logSuccess('[ CONN ]', `Bot ${global.config.name} berhasil terhubung! ✅`);
             logInfo('[ UPTIME ]', `Bot aktif sejak: ${new Date(global.startTime).toLocaleString()}`);
@@ -703,21 +706,15 @@ function setupConnectionHandlers(sock, usePairing) {
 
 /**
  * Handle credential update (simpan session)
- * Debounced agar tidak ada race condition saat creds.update fire berkali-kali
- * (ref: Baileys issue #1769 — key update harus disave dengan benar)
+ * Langsung save TANPA debounce — debounce bisa kehilangan credentials
+ * jika bot disconnect/sebelum debounce timeout jalan.
+ * (ref: Baileys README — creds.update HARUS disave segera)
  */
 function setupCredentialHandlers(sock, saveCreds) {
-    let saveTimeout = null;
-    const DEBOUNCE_MS = 1000; // 1 detik debounce
-
     sock.ev.on('creds.update', () => {
-        if (saveTimeout) clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => {
-            saveCreds().catch(err => {
-                logError('[ CREDS ]', new Error('Gagal save credentials: ' + err.message));
-            });
-            saveTimeout = null;
-        }, DEBOUNCE_MS);
+        saveCreds().catch(err => {
+            logError('[ CREDS ]', new Error('Gagal save credentials: ' + err.message));
+        });
     });
 }
 
@@ -1182,6 +1179,13 @@ function printBanner() {
  * Inisialisasi dan jalankan bot
  */
 async function startIkuyo() {
+    // Guard: cegah multiple startIkuyo() jalan bareng
+    if (isStarting) {
+        logInfo('[ START ]', 'Bot sudah starting, skip duplicate call...');
+        return;
+    }
+    isStarting = true;
+
     // ── Load semua plugin ──
     await loadPlugins();
 
@@ -1214,6 +1218,10 @@ async function startIkuyo() {
 
     // ── Buat socket dengan connection options stabil ──
     // (ref: Baileys issue #2249, Baileys Connecting docs)
+    
+    // Closure untuk patchMessageBeforeSending — perlu ref ke sock yang belum tercipta
+    let sockRef = null;
+    
     const sock = makeWASocket({
         version: waVersion,
         logger: pino({ level: 'silent' }),
@@ -1237,7 +1245,18 @@ async function startIkuyo() {
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect: false,
         fireInitQueries: true,
+        // PreKey management (fix: konek lalu putus karena prekey habis/korrupt)
+        // Upload prekeys SEBELUM kirim pesan, mencegah WA kick
+        // (ref: Baileys issue #1769, #2340)
+        patchMessageBeforeSending: async (msg) => {
+            if (sockRef) {
+                try { await sockRef.uploadPreKeysToServerIfRequired(); } catch {}
+            }
+            return msg;
+        },
     });
+    
+    sockRef = sock;
 
     // ── Setup semua handler ──
     setupConnectionHandlers(sock, usePairing);
@@ -1250,9 +1269,8 @@ async function startIkuyo() {
     // ── Simpan sock ke global untuk akses dari plugin/case ──
     global.sock = sock;
 
-    // ── PreKey management (fix: konek lalu putus karena prekey habis/korrupt) ──
-    // ref: Baileys issue #1769, #2340
-    // Upload prekeys setelah koneksi open & sebelum kirim pesan
+    // ── PreKey management: upload prekeys setelah koneksi open ──
+    // (ref: Baileys issue #1769, #2340)
     sock.ev.on('connection.update', (update) => {
         if (update.connection === 'open') {
             sock.uploadPreKeysToServerIfRequired().catch(err => {
@@ -1260,12 +1278,6 @@ async function startIkuyo() {
             });
         }
     });
-
-    // Override patchMessageBeforeSending setelah sock tercipta
-    sock.patchMessageBeforeSending = async (msg) => {
-        try { await sock.uploadPreKeysToServerIfRequired(); } catch {}
-        return msg;
-    };
 
     // ── Pairing code di-request di setupConnectionHandlers saat
     //    connection === 'connecting' (WebSocket sudah ready)
