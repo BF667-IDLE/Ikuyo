@@ -512,9 +512,7 @@ function resetReconnectCounter() {
 /**
  * Handle koneksi update (QR, pairing, reconnect, dll)
  */
-function setupConnectionHandlers(sock, usePairing, pairCode) {
-    let pairingRequested = false;
-
+function setupConnectionHandlers(sock, usePairing) {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -529,7 +527,6 @@ function setupConnectionHandlers(sock, usePairing, pairCode) {
             const reason = lastDisconnect?.error?.output?.statusCode;
             const reasonMsg = lastDisconnect?.error?.message || 'Unknown';
             logError('[ CONN ]', new Error(`Koneksi ditutup. Kode: ${reason} | ${reasonMsg}`));
-            pairingRequested = false;
 
             if (reason === DisconnectReason.loggedOut) {
                 logError('[ CONN ]', new Error('Device logged out. Hapus session dan scan ulang.'));
@@ -560,14 +557,6 @@ function setupConnectionHandlers(sock, usePairing, pairCode) {
             resetReconnectCounter();
             logSuccess('[ CONN ]', `Bot ${global.config.name} berhasil terhubung! ✅`);
             logInfo('[ UPTIME ]', `Bot aktif sejak: ${new Date(global.startTime).toLocaleString()}`);
-
-            // Request pairing code jika enabled dan belum terdaftar
-            if (usePairing && !sock.authState.creds.registered && !pairingRequested) {
-                pairingRequested = true;
-                await requestPairingCode(sock, pairCode).catch(() => {
-                    pairingRequested = false;
-                });
-            }
         }
 
         // ── Koneksi sedang menghubungkan ──
@@ -1066,7 +1055,7 @@ async function startIkuyo() {
     });
 
     // ── Setup semua handler ──
-    setupConnectionHandlers(sock, usePairing, pairCode);
+    setupConnectionHandlers(sock, usePairing);
     setupCredentialHandlers(sock, saveCreds);
     setupMessageHandlers(sock);
     setupGroupHandlers(sock);
@@ -1075,6 +1064,30 @@ async function startIkuyo() {
 
     // ── Simpan sock ke global untuk akses dari plugin/case ──
     global.sock = sock;
+
+    // ── Request pairing code SECELANG setelah socket dibuat ──
+    if (usePairing && !state.creds?.registered) {
+        const formattedCode = pairCode.replace(/[^0-9]/g, '');
+        if (formattedCode) {
+            try {
+                logInfo('[ PAIRING ]', 'Merequest pairing code...');
+                const code = await sock.requestPairingCode(formattedCode);
+                console.log(chalk.green.bold('╔══════════════════════════════════════╗'));
+                console.log(chalk.green.bold('║         KODE PAIRING BOT            ║'));
+                console.log(chalk.green.bold('╚══════════════════════════════════════╝'));
+                console.log(chalk.cyan(`\n  ➤ Kode: ${chalk.bold.white.bgRed(' ' + code + ' ')}\n`));
+                console.log(chalk.yellow('  Masukkan kode ini di WhatsApp:'));
+                console.log(chalk.yellow('  Settings > Linked Devices > Link Device\n'));
+                logSuccess('[ PAIRING ]', `Kode pairing: ${code}`);
+            } catch (err) {
+                logError('[ PAIRING ]', new Error('Gagal request pairing code: ' + err.message));
+            }
+        } else {
+            logWarn('[ PAIRING ]', 'pairing_code kosong di config.js! Isi dengan nomor WA kamu.');
+        }
+    } else if (!usePairing && !state.creds?.registered) {
+        logInfo('[ QR ]', 'Scan QR code untuk menghubungkan bot...');
+    }
 
     // ── Initialize JadiBot Manager ──
     jadibot.init(sock);
