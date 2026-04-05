@@ -1219,9 +1219,11 @@ async function startIkuyo() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false, // handle via connection.update event
         auth: state,
-        mobile: false,
-        // Browser: macOS Desktop lebih stabil (ref: Baileys README, issue #2060)
-        browser: Browsers.macOS('Desktop'),
+        // Browser: HARUS pakai browser name ('Chrome'), BUKAN 'Desktop'!
+        // 'Desktop' → companion_platform_id=7 (DESKTOP) → WA REJECT pairing code
+        // 'Chrome' → companion_platform_id=1 (CHROME) → pairing code WORKS
+        // (ref: Baileys issue #1721, #2306, PR #2393, PR #2409)
+        browser: Browsers.macOS('Chrome'),
         // Connection stability (ref: Baileys issue #2249)
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
