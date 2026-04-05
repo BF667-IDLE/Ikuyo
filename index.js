@@ -23,7 +23,8 @@ const {
     DisconnectReason,
     fetchLatestBaileysVersion,
     makeInMemoryStore,
-    downloadMediaMessage
+    downloadMediaMessage,
+    Browsers
 } = require('@whiskeysockets/baileys');
 
 // ─── Local Modules ───
@@ -531,7 +532,16 @@ function setupConnectionHandlers(sock, usePairing) {
             const reasonMsg = lastDisconnect?.error?.message || 'Unknown';
             logError('[ CONN ]', new Error(`Koneksi ditutup. Kode: ${reason} | ${reasonMsg}`));
 
-            if (reason === DisconnectReason.loggedOut) {
+            // 515 = "Stream Errored (restart required)" — NORMAL setelah QR scan!
+            //    WhatsApp forcibly disconnects lalu auto-reconnect.
+            //    (ref: Baileys issue #1620, openclaw #45756)
+            if (reason === 515 || reason === DisconnectReason.restartRequired) {
+                logInfo('[ CONN ]', 'Stream restart (515) — ini NORMAL setelah QR scan, auto-reconnect...');
+                const delay = 2000;
+                setTimeout(() => startIkuyo(), delay);
+            }
+
+            else if (reason === DisconnectReason.loggedOut) {
                 // 528 = logged out, harus hapus session & pairing ulang
                 logWarn('[ CONN ]', 'Device logged out. Menghapus session & restart...');
 
@@ -1122,14 +1132,34 @@ async function startIkuyo() {
 
     const usePairing = global.config.pairing?.is_pairing || false;
 
+    // ── Fetch WA Version dengan timeout (issue #1990 — bisa hang forever) ──
+    // Jika fetchLatestBaileysVersion() hang, pakai hardcoded fallback
+    let waVersion;
+    try {
+        const versionResult = await Promise.race([
+            fetchLatestBaileysVersion(),
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('fetchLatestBaileysVersion timeout (10s)')), 10000)
+            )
+        ]);
+        waVersion = versionResult.version;
+        logInfo('[ VERSION ]', `WA version fetched: ${waVersion.join('.')}`);
+    } catch (err) {
+        // Hardcoded fallback — update manual jika WA ubah versi
+        waVersion = [2, 3000, 1033846690];
+        logWarn('[ VERSION ]', `Gagal fetch WA version (${err.message}), pakai fallback: ${waVersion.join('.')}`);
+    }
+
     // ── Buat socket dengan connection options stabil ──
     // (ref: Baileys issue #2249 — timeout & keepAlive mencegah 428)
     const sock = makeWASocket({
-        version: (await fetchLatestBaileysVersion()).version,
+        version: waVersion,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: !usePairing,
+        printQRInTerminal: false, // deprecated, handle via connection.update event
         auth: state,
-        browser: ['Chrome', 'Windows', '124.0.6367.207'],
+        mobile: false,
+        // Browser preset dari Baileys (lebih realistis & up-to-date)
+        browser: Browsers.macOS('Chrome'),
         // Connection stability options
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
