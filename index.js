@@ -1118,7 +1118,7 @@ function printBanner() {
     console.log(chalk.white(`  📌 Bot Name    : ${chalk.bold.green(global.config.name)}`));
     console.log(chalk.white(`  📌 Owner       : ${chalk.bold.green(global.config.owner)}`));
     console.log(chalk.white(`  📌 Prefix      : ${chalk.bold.green(global.config.prefix)}`));
-    console.log(chalk.white(`  📌 Pairing     : ${chalk.bold.green(global.config.pairing?.is_pairing ? 'ON' : 'OFF (QR)')}`));
+    console.log(chalk.white(`  📌 Pairing     : ${chalk.bold.green(global.config.pairing?.enabled ? 'ON (Code)' : 'OFF (QR)')}`));
     console.log(chalk.white(`  📌 Session     : ${chalk.bold.green(global.config.sessionName)}`));
     console.log(chalk.white(`  📌 Started At  : ${chalk.bold.green(new Date(global.startTime).toLocaleString())}`));
     console.log(chalk.gray(`  ${'─'.repeat(40)}`));
