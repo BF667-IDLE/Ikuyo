@@ -13,8 +13,11 @@ global.config = {
 
     // Pengaturan Pairing Code
     pairing: {
-        is_pairing: true, // true = gunakan pairing code, false = gunakan QR Code
-        pairing_code: "6285124252139" // Kode pairing default (akan request ini jika state baru)
+        enabled: true,         // true = gunakan pairing code, false = gunakan QR Code
+        phone_number: "",     // Nomor WA untuk request pairing code (kosongkan = pakai owner number)
+        // pairing_code sudah deprecated, gunakan phone_number
+        // WhatsApp pairing code di-generate random oleh server, TIDAK bisa di-custom
+        // Yang bisa di-custom hanya NOMOR TELEPON yang akan menerima kode
     },
 
     // Pengaturan Rate Limiting

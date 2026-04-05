@@ -24,7 +24,8 @@ const {
     fetchLatestBaileysVersion,
     makeInMemoryStore,
     downloadMediaMessage,
-    Browsers
+    Browsers,
+    isJidBroadcast
 } = require('@whiskeysockets/baileys');
 
 // ─── Local Modules ───
@@ -468,21 +469,31 @@ function serializeMessage(message, sock) {
 // ============================================================
 
 /**
+ * Ambil nomor telepon untuk pairing dari config.
+ * Priority: pairing.phone_number > pairing.pairing_code (legacy) > owner
+ * @returns {string} nomor telepon yang sudah di-strip
+ */
+function getPairingPhoneNumber() {
+    const pairing = global.config.pairing || {};
+    // Support legacy field name
+    const phoneNumber = pairing.phone_number || pairing.pairing_code || global.config.owner || '';
+    return phoneNumber.replace(/[^0-9]/g, '');
+}
+
+/**
  * Request pairing code untuk device linking
+ * @param {object} sock - Baileys socket
+ * @param {string} phoneNumber - Nomor telepon (tanpa +)
+ * @returns {string} pairing code dari WhatsApp
  */
 async function requestPairingCode(sock, phoneNumber) {
-    try {
-        const formattedCode = phoneNumber.replace(/[^0-9]/g, '');
-        const pairingCode = await sock.requestPairingCode(formattedCode);
+    const formatted = phoneNumber.replace(/[^0-9]/g, '');
+    if (!formatted) throw new Error('Nomor telepon kosong!');
 
-        logSuccess('[ PAIRING ]', `Kode pairing: ${pairingCode}`);
-        console.log(chalk.cyan('Masukkan kode ini di WhatsApp: Settings > Linked Devices > Link Device'));
-
-        return pairingCode;
-    } catch (error) {
-        logError('[ PAIRING ] Gagal request pairing code', error);
-        throw error;
-    }
+    const code = await sock.requestPairingCode(formatted);
+    logSuccess('[ PAIRING ]', `Kode pairing: ${code}`);
+    console.log(chalk.cyan('Masukkan kode ini di WhatsApp: Settings > Linked Devices > Link Device'));
+    return code;
 }
 
 // ============================================================
@@ -514,62 +525,64 @@ function resetReconnectCounter() {
  * Handle koneksi update (QR, pairing, reconnect, dll)
  * Mengikuti best practice dari Baileys docs & GitHub issues.
  */
+/**
+ * Hapus folder session secara aman
+ */
+function deleteSessionFolder() {
+    const sessionDir = global.config.sessionName || 'session';
+    try {
+        const sessionPath = path.join(__dirname, sessionDir);
+        if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+            logSuccess('[ CONN ]', `Session folder "${sessionDir}" dihapus.`);
+        }
+    } catch (err) {
+        logError('[ CONN ]', new Error('Gagal hapus session: ' + err.message));
+    }
+}
+
 function setupConnectionHandlers(sock, usePairing) {
     let pairingRequested = false;
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // ── QR Code (hanya jika tidak pakai pairing) ──
-        if (qr && !usePairing) {
-            console.log(chalk.yellow('[ QR MODE ] Scan QR code di bawah:'));
-            qrcode.generate(qr, { small: true });
+        // ── QR Code — tampilkan di terminal ──
+        if (qr) {
+            if (!usePairing) {
+                console.log(chalk.yellow('\n[ QR MODE ] Scan QR code di bawah:'));
+                console.log(chalk.yellow('Buka WhatsApp > Settings > Linked Devices > Link a Device\n'));
+                qrcode.generate(qr, { small: true });
+            }
         }
 
         // ── Koneksi terputus ──
         if (connection === 'close') {
-            const reason = lastDisconnect?.error?.output?.statusCode;
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
             const reasonMsg = lastDisconnect?.error?.message || 'Unknown';
-            logError('[ CONN ]', new Error(`Koneksi ditutup. Kode: ${reason} | ${reasonMsg}`));
+            logError('[ CONN ]', new Error(`Koneksi ditutup. Code: ${statusCode} | ${reasonMsg}`));
 
             // 515 = "Stream Errored (restart required)" — NORMAL setelah QR scan!
             //    WhatsApp forcibly disconnects lalu auto-reconnect.
             //    (ref: Baileys issue #1620, openclaw #45756)
-            if (reason === 515 || reason === DisconnectReason.restartRequired) {
+            if (statusCode === 515 || statusCode === DisconnectReason.restartRequired) {
                 logInfo('[ CONN ]', 'Stream restart (515) — ini NORMAL setelah QR scan, auto-reconnect...');
                 const delay = 2000;
                 setTimeout(() => startIkuyo(), delay);
             }
 
-            else if (reason === DisconnectReason.loggedOut) {
+            else if (statusCode === DisconnectReason.loggedOut) {
                 // 528 = logged out, harus hapus session & pairing ulang
                 logWarn('[ CONN ]', 'Device logged out. Menghapus session & restart...');
 
                 // Stop all jadibots
-                try {
-                    const stopped = jadibot.stopAll();
-                    if (stopped > 0) logInfo('[ CONN ]', `Stopped ${stopped} jadibot(s)`);
-                } catch {}
+                try { jadibot.stopAll(); } catch {}
 
-                // Save data to HF before reset
                 if (hfdb.enabled) {
-                    try {
-                        logInfo('[ CONN ]', 'Saving data to HuggingFace...');
-                        await hfdb.syncJadibot('push');
-                    } catch {}
+                    try { await hfdb.syncJadibot('push'); } catch {}
                 }
 
-                // Hapus folder session
-                const sessionDir = global.config.sessionName || 'session';
-                try {
-                    const sessionPath = path.join(__dirname, sessionDir);
-                    if (fs.existsSync(sessionPath)) {
-                        fs.rmSync(sessionPath, { recursive: true, force: true });
-                        logSuccess('[ CONN ]', `Session folder "${sessionDir}" dihapus.`);
-                    }
-                } catch (err) {
-                    logError('[ CONN ]', new Error('Gagal hapus session: ' + err.message));
-                }
+                deleteSessionFolder();
 
                 // Restart bot
                 pairingRequested = false;
@@ -577,20 +590,20 @@ function setupConnectionHandlers(sock, usePairing) {
                 resetReconnectCounter();
                 setTimeout(() => startIkuyo(), 3000);
 
-            } else if (reason === 401 || reason === DisconnectReason.connectionClosed) {
-                // 401 = session corrupt/invalid, 428 = connection terminated (reconnectable)
-                // Coba reconnect dulu, jangan langsung hapus session
+            } else if (statusCode === 401) {
+                // 401 = session invalid/corrupt — langsung hapus & restart
+                logWarn('[ CONN ]', 'Session invalid (401). Hapus session & restart...');
+                deleteSessionFolder();
+                pairingRequested = false;
+                resetReconnectCounter();
+                setTimeout(() => startIkuyo(), 3000);
+
+            } else if (statusCode === 428 || statusCode === DisconnectReason.connectionClosed) {
+                // 428 = connection terminated — coba reconnect dulu
                 if (reconnectAttempts >= 5) {
                     // Setelah 5x gagal, baru hapus session
-                    logWarn('[ CONN ]', `Gagal ${reconnectAttempts}x. Hapus session & restart...`);
-                    const sessionDir = global.config.sessionName || 'session';
-                    try {
-                        const sessionPath = path.join(__dirname, sessionDir);
-                        if (fs.existsSync(sessionPath)) {
-                            fs.rmSync(sessionPath, { recursive: true, force: true });
-                            logSuccess('[ CONN ]', `Session folder "${sessionDir}" dihapus.`);
-                        }
-                    } catch {}
+                    logWarn('[ CONN ]', `Gagal reconnect ${reconnectAttempts}x. Hapus session & restart...`);
+                    deleteSessionFolder();
                     pairingRequested = false;
                     resetReconnectCounter();
                     setTimeout(() => startIkuyo(), 3000);
@@ -617,34 +630,32 @@ function setupConnectionHandlers(sock, usePairing) {
         }
 
         // ── Koneksi sedang menghubungkan → request pairing code di sini ──
+        // ── Koneksi sedang menghubungkan → request pairing code ──
         else if (connection === 'connecting') {
             if (usePairing && !pairingRequested) {
                 pairingRequested = true;
-                const pairCode = global.config.pairing?.pairing_code || '';
-                const formattedCode = pairCode.replace(/[^0-9]/g, '');
+                const phoneNumber = getPairingPhoneNumber();
 
-                if (formattedCode) {
-                    // Tunggu 500ms agar WebSocket benar-benar ready
-                    // (ref: Baileys issue #1774 — requestPairingCode gagal jika
-                    //  dipanggil terlalu cepat saat connection baru establishing)
+                if (phoneNumber) {
+                    logInfo('[ PAIRING ]', `Merequest pairing code untuk ${phoneNumber}...`);
+                    // Delay 800ms agar WebSocket ready (ref: Baileys issue #1774)
                     setTimeout(async () => {
                         try {
-                            logInfo('[ PAIRING ]', 'Merequest pairing code...');
-                            const code = await sock.requestPairingCode(formattedCode);
-                            console.log(chalk.green.bold('╔══════════════════════════════════════╗'));
+                            const code = await requestPairingCode(sock, phoneNumber);
+                            console.log(chalk.green.bold('\n╔══════════════════════════════════════╗'));
                             console.log(chalk.green.bold('║         KODE PAIRING BOT            ║'));
                             console.log(chalk.green.bold('╚══════════════════════════════════════╝'));
-                            console.log(chalk.cyan(`\n  ➤ Kode: ${chalk.bold.white.bgRed(' ' + code + ' ')}\n`));
-                            console.log(chalk.yellow('  Masukkan kode ini di WhatsApp:'));
+                            console.log(chalk.cyan(`  ➤ Nomor : ${chalk.bold(phoneNumber)}`));
+                            console.log(chalk.cyan(`  ➤ Kode  : ${chalk.bold.white.bgRed(' ' + code + ' ')}`));
+                            console.log(chalk.yellow('\n  Masukkan kode ini di WhatsApp:'));
                             console.log(chalk.yellow('  Settings > Linked Devices > Link Device\n'));
-                            logSuccess('[ PAIRING ]', `Kode pairing: ${code}`);
                         } catch (err) {
                             logError('[ PAIRING ]', new Error('Gagal request pairing code: ' + err.message));
                             pairingRequested = false;
                         }
-                    }, 500);
+                    }, 800);
                 } else {
-                    logWarn('[ PAIRING ]', 'pairing_code kosong di config.js! Isi dengan nomor WA kamu.');
+                    logWarn('[ PAIRING ]', 'phone_number kosong! Set pairing.phone_number atau pastikan owner sudah diisi.');
                     pairingRequested = false;
                 }
             } else {
@@ -1130,7 +1141,9 @@ async function startIkuyo() {
         global.config.sessionName || 'session'
     );
 
-    const usePairing = global.config.pairing?.is_pairing || false;
+    // Support both old (is_pairing) and new (enabled) config key
+    const pairingConfig = global.config.pairing || {};
+    const usePairing = pairingConfig.enabled !== undefined ? pairingConfig.enabled : (pairingConfig.is_pairing || false);
 
     // ── Fetch WA Version dengan timeout (issue #1990 — bisa hang forever) ──
     // Jika fetchLatestBaileysVersion() hang, pakai hardcoded fallback
@@ -1151,25 +1164,27 @@ async function startIkuyo() {
     }
 
     // ── Buat socket dengan connection options stabil ──
-    // (ref: Baileys issue #2249 — timeout & keepAlive mencegah 428)
+    // (ref: Baileys issue #2249, Baileys Connecting docs)
     const sock = makeWASocket({
         version: waVersion,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: false, // deprecated, handle via connection.update event
+        printQRInTerminal: false, // handle via connection.update event
         auth: state,
         mobile: false,
-        // Browser preset dari Baileys (lebih realistis & up-to-date)
-        browser: Browsers.macOS('Chrome'),
-        // Connection stability options
+        // Browser: ubuntu('Chrome') lebih stabil untuk server environment
+        browser: Browsers.ubuntu('Chrome'),
+        // Connection stability (ref: Baileys issue #2249)
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        qrTimeout: 60000,
-        retryRequestDelayMs: 1000 + Math.floor(Math.random() * 2000),
+        keepAliveIntervalMs: 25000,
+        qrTimeout: 80000,     // 80 detik QR valid
+        retryRequestDelayMs: 2500,
+        emitOwnEvents: false,
         // Optimasi
         syncFullHistory: false,
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect: false,
+        fireInitQueries: true,
     });
 
     // ── Setup semua handler ──
@@ -1185,7 +1200,11 @@ async function startIkuyo() {
 
     // ── Pairing code di-request di setupConnectionHandlers saat
     //    connection === 'connecting' (WebSocket sudah ready)
-    //    Jangan request di sini — akan error "Connection Closed"!
+    //    (ref: Baileys docs — Connecting > Pairing Code login)
+    //
+    // ── Phone number untuk pairing:
+    //    config.pairing.phone_number > config.pairing.pairing_code (legacy) > config.owner
+    //    Gunakan command .pair <nomor> untuk mengubah nomor via WhatsApp
 
     // ── Initialize JadiBot Manager ──
     jadibot.init(sock);
