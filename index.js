@@ -562,61 +562,97 @@ function setupConnectionHandlers(sock, usePairing) {
             const reasonMsg = lastDisconnect?.error?.message || 'Unknown';
             logError('[ CONN ]', new Error(`Koneksi ditutup. Code: ${statusCode} | ${reasonMsg}`));
 
-            // 515 = "Stream Errored (restart required)" — NORMAL setelah QR scan!
-            //    WhatsApp forcibly disconnects lalu auto-reconnect.
-            //    (ref: Baileys issue #1620, openclaw #45756)
+            // ── 515 = Stream Errored (restart required) ──
+            //    NORMAL setelah QR scan / pairing code — WA server restart stream.
+            //    (ref: Baileys issue #1620, #2040)
             if (statusCode === 515 || statusCode === DisconnectReason.restartRequired) {
-                logInfo('[ CONN ]', 'Stream restart (515) — ini NORMAL setelah QR scan, auto-reconnect...');
-                const delay = 2000;
-                setTimeout(() => startIkuyo(), delay);
+                logInfo('[ CONN ]', 'Stream restart (515) — ini NORMAL, auto-reconnect...');
+                resetReconnectCounter();
+                setTimeout(() => startIkuyo(), 2000);
             }
 
-            else if (statusCode === DisconnectReason.loggedOut) {
-                // 528 = logged out, harus hapus session & pairing ulang
-                logWarn('[ CONN ]', 'Device logged out. Menghapus session & restart...');
-
-                // Stop all jadibots
-                try { jadibot.stopAll(); } catch {}
-
-                if (hfdb.enabled) {
-                    try { await hfdb.syncJadibot('push'); } catch {}
-                }
-
-                deleteSessionFolder();
-
-                // Restart bot
-                pairingRequested = false;
-                logInfo('[ CONN ]', 'Restarting bot dalam 3 detik...');
-                resetReconnectCounter();
-                setTimeout(() => startIkuyo(), 3000);
-
-            } else if (statusCode === 401) {
-                // 401 = session invalid/corrupt — langsung hapus & restart
+            // ── 401 = Unauthorized / session invalid ──
+            //    Hapus session & pairing ulang
+            else if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
                 logWarn('[ CONN ]', 'Session invalid (401). Hapus session & restart...');
+                try { jadibot.stopAll(); } catch {}
+                if (hfdb.enabled) { try { await hfdb.syncJadibot('push'); } catch {} }
                 deleteSessionFolder();
                 pairingRequested = false;
                 resetReconnectCounter();
                 setTimeout(() => startIkuyo(), 3000);
+            }
 
-            } else if (statusCode === 428 || statusCode === DisconnectReason.connectionClosed) {
-                // 428 = connection terminated — coba reconnect dulu
+            // ── 500 = badSession / Signal key corruption ──
+            //    Session korrupt, HARUS hapus & pairing ulang (tidak bisa recovery)
+            //    (ref: Baileys issue #860, #1769)
+            else if (statusCode === 500 || statusCode === DisconnectReason.badSession) {
+                logWarn('[ CONN ]', 'Bad session / Signal key corrupt (500). Hapus session & restart...');
+                try { jadibot.stopAll(); } catch {}
+                deleteSessionFolder();
+                pairingRequested = false;
+                resetReconnectCounter();
+                setTimeout(() => startIkuyo(), 3000);
+            }
+
+            // ── 428 = Too many reconnect attempts (WA rate limiting) ──
+            //    Jangan langsung hapus session — coba dengan delay lebih lama
+            //    (ref: Baileys issue #2249)
+            else if (statusCode === 428) {
                 if (reconnectAttempts >= 5) {
-                    // Setelah 5x gagal, baru hapus session
-                    logWarn('[ CONN ]', `Gagal reconnect ${reconnectAttempts}x. Hapus session & restart...`);
+                    logWarn('[ CONN ]', `Rate limited 5x (428). Hapus session & restart...`);
+                    try { jadibot.stopAll(); } catch {}
                     deleteSessionFolder();
                     pairingRequested = false;
                     resetReconnectCounter();
-                    setTimeout(() => startIkuyo(), 3000);
+                    setTimeout(() => startIkuyo(), 5000);
                 } else {
-                    const delay = getReconnectDelay();
-                    logWarn('[ CONN ]', `Mencoba reconnect dalam ${delay / 1000}s (attempt #${reconnectAttempts})...`);
+                    // Delay lebih lama untuk rate limit (min 10s, exponential)
+                    const delay = Math.max(getReconnectDelay(), 10000);
+                    logWarn('[ CONN ]', `Rate limited (428). Reconnect dalam ${delay / 1000}s (attempt #${reconnectAttempts})...`);
                     setTimeout(() => startIkuyo(), delay);
                 }
+            }
 
-            } else {
-                // Error lain (timeout, dll) — reconnect dengan backoff
+            // ── 440 = connectionLost / 528 = connectionClosed ──
+            //    Network issue atau server WA tutup koneksi — reconnect dengan backoff
+            //    (ref: Baileys docs: DisconnectReason)
+            else if (statusCode === 440 || statusCode === 528 ||
+                     statusCode === DisconnectReason.connectionLost ||
+                     statusCode === DisconnectReason.connectionClosed) {
                 const delay = getReconnectDelay();
-                logWarn('[ CONN ]', `Mencoba reconnect dalam ${delay / 1000}s (attempt #${reconnectAttempts})...`);
+                logWarn('[ CONN ]', `Connection lost/closed (${statusCode}). Reconnect dalam ${delay / 1000}s (attempt #${reconnectAttempts})...`);
+                setTimeout(() => startIkuyo(), delay);
+            }
+
+            // ── 408 = Timed Out ──
+            //    QR/pairing expired atau timeout — restart pairing
+            else if (statusCode === 408 || statusCode === DisconnectReason.timedOut) {
+                logWarn('[ CONN ]', 'Connection timed out (408). Restart...');
+                pairingRequested = false;
+                resetReconnectCounter();
+                setTimeout(() => startIkuyo(), 3000);
+            }
+
+            // ── 415 = Connection Replaced ──
+            //    Session lain ambil alih — STOP bot
+            else if (statusCode === 415 || statusCode === DisconnectReason.connectionReplaced) {
+                logError('[ CONN ]', new Error('Connection replaced (415)! Session lain ambil alih. Bot dihentikan.'));
+                process.exit(1);
+            }
+
+            // ── 503 = Service Unavailable ──
+            //    WA server down — tunggu lama lalu coba lagi
+            else if (statusCode === 503) {
+                logWarn('[ CONN ]', 'WhatsApp service unavailable (503). Tunggu 30s...');
+                resetReconnectCounter();
+                setTimeout(() => startIkuyo(), 30000);
+            }
+
+            // ── Error lain yang tidak dikenal ──
+            else {
+                const delay = getReconnectDelay();
+                logWarn('[ CONN ]', `Unknown disconnect (${statusCode}). Reconnect dalam ${delay / 1000}s (attempt #${reconnectAttempts})...`);
                 setTimeout(() => startIkuyo(), delay);
             }
         }
@@ -667,9 +703,22 @@ function setupConnectionHandlers(sock, usePairing) {
 
 /**
  * Handle credential update (simpan session)
+ * Debounced agar tidak ada race condition saat creds.update fire berkali-kali
+ * (ref: Baileys issue #1769 — key update harus disave dengan benar)
  */
 function setupCredentialHandlers(sock, saveCreds) {
-    sock.ev.on('creds.update', saveCreds);
+    let saveTimeout = null;
+    const DEBOUNCE_MS = 1000; // 1 detik debounce
+
+    sock.ev.on('creds.update', () => {
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+            saveCreds().catch(err => {
+                logError('[ CREDS ]', new Error('Gagal save credentials: ' + err.message));
+            });
+            saveTimeout = null;
+        }, DEBOUNCE_MS);
+    });
 }
 
 // ============================================================
@@ -1171,8 +1220,8 @@ async function startIkuyo() {
         printQRInTerminal: false, // handle via connection.update event
         auth: state,
         mobile: false,
-        // Browser: ubuntu('Chrome') lebih stabil untuk server environment
-        browser: Browsers.ubuntu('Chrome'),
+        // Browser: macOS Desktop lebih stabil (ref: Baileys README, issue #2060)
+        browser: Browsers.macOS('Desktop'),
         // Connection stability (ref: Baileys issue #2249)
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
@@ -1182,6 +1231,7 @@ async function startIkuyo() {
         emitOwnEvents: false,
         // Optimasi
         syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false, // Jangan sync history, hemat resource
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect: false,
         fireInitQueries: true,
@@ -1197,6 +1247,23 @@ async function startIkuyo() {
 
     // ── Simpan sock ke global untuk akses dari plugin/case ──
     global.sock = sock;
+
+    // ── PreKey management (fix: konek lalu putus karena prekey habis/korrupt) ──
+    // ref: Baileys issue #1769, #2340
+    // Upload prekeys setelah koneksi open & sebelum kirim pesan
+    sock.ev.on('connection.update', (update) => {
+        if (update.connection === 'open') {
+            sock.uploadPreKeysToServerIfRequired().catch(err => {
+                logError('[ PREKEY ]', new Error('Gagal upload prekeys: ' + err.message));
+            });
+        }
+    });
+
+    // Override patchMessageBeforeSending setelah sock tercipta
+    sock.patchMessageBeforeSending = async (msg) => {
+        try { await sock.uploadPreKeysToServerIfRequired(); } catch {}
+        return msg;
+    };
 
     // ── Pairing code di-request di setupConnectionHandlers saat
     //    connection === 'connecting' (WebSocket sudah ready)
