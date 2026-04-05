@@ -528,15 +528,16 @@ function setupConnectionHandlers(sock, usePairing) {
             const reasonMsg = lastDisconnect?.error?.message || 'Unknown';
             logError('[ CONN ]', new Error(`Koneksi ditutup. Kode: ${reason} | ${reasonMsg}`));
 
-            if (reason === DisconnectReason.loggedOut) {
-                logError('[ CONN ]', new Error('Device logged out. Hapus session dan scan ulang.'));
+            if (reason === DisconnectReason.loggedOut || reason === 401) {
+                logWarn('[ CONN ]', 'Session invalid / logged out. Menghapus session & restart...');
+
                 // Stop all jadibots on main bot logout
                 try {
                     const stopped = jadibot.stopAll();
-                    if (stopped > 0) logInfo('[ CONN ]', `Stopped ${stopped} jadibot(s) on main bot logout`);
+                    if (stopped > 0) logInfo('[ CONN ]', `Stopped ${stopped} jadibot(s)`);
                 } catch {}
 
-                // Save data to HF before exit
+                // Save data to HF before reset
                 if (hfdb.enabled) {
                     try {
                         logInfo('[ CONN ]', 'Saving data to HuggingFace...');
@@ -544,7 +545,22 @@ function setupConnectionHandlers(sock, usePairing) {
                     } catch {}
                 }
 
-                process.exit(1);
+                // Hapus folder session agar pairing code bisa di-request ulang
+                const sessionDir = global.config.sessionName || 'session';
+                try {
+                    const sessionPath = path.join(__dirname, sessionDir);
+                    if (fs.existsSync(sessionPath)) {
+                        fs.rmSync(sessionPath, { recursive: true, force: true });
+                        logSuccess('[ CONN ]', `Session folder "${sessionDir}" berhasil dihapus.`);
+                    }
+                } catch (err) {
+                    logError('[ CONN ]', new Error('Gagal hapus session: ' + err.message));
+                }
+
+                // Restart bot (dengan session kosong → pairing code akan muncul)
+                logInfo('[ CONN ]', 'Restarting bot dalam 3 detik...');
+                resetReconnectCounter();
+                setTimeout(() => startIkuyo(), 3000);
             } else {
                 const delay = getReconnectDelay();
                 logWarn('[ CONN ]', `Mencoba reconnect dalam ${delay / 1000}s (attempt #${reconnectAttempts})...`);
