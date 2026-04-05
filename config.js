@@ -14,7 +14,7 @@ global.config = {
     // Pengaturan Pairing Code
     pairing: {
         enabled: true,         // true = gunakan pairing code, false = gunakan QR Code
-        phone_number: "6283150958207", // Nomor WA untuk request pairing code (ubah sesuai nomor kamu)
+        phone_number: "6285124252139", // Nomor WA untuk request pairing code (ubah sesuai nomor kamu)
         // Tips: 
         // - Format: kode negara + nomor (tanpa + dan spasi)
         // - Contoh: "628123456789" (Indonesia), "14155552671" (US)
